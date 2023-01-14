@@ -74,6 +74,12 @@ When publishing, draft are rendered as HTML, but not included in
 the index, archive, tags, or RSS feed."
   :type '(directory))
 
+(defcustom org-static-blog-attachment-directory "static/"
+  "Directory where published attachments of ORG files are stored.
+Attachments are not copied by org-static-blog, use ox-publish to
+copy attachments separately."
+  :type '(directory))
+
 (defcustom org-static-blog-index-file "index.html"
   "File name of the blog landing page.
 The index page contains the most recent
@@ -641,26 +647,40 @@ The index, archive, tags, and RSS feed are not updated."
 (defun org-static-blog-render-post-content (post-filename)
   "Render blog content as bare HTML without header."
   (let ((org-html-doctype "html5")
-        (org-html-html5-fancy t))
+        (org-html-html5-fancy t)
+        (org-attach-id-dir (if (file-name-absolute-p org-attach-id-dir)
+                               org-attach-id-dir
+                             (concat (file-name-directory post-filename) org-attach-id-dir))))
     (save-excursion
-      (let ((current-buffer (current-buffer))
-            (buffer-exists (org-static-blog-file-buffer post-filename))
-            (result nil))
-        (with-temp-buffer
-          (if buffer-exists
-              (insert-buffer-substring buffer-exists)
-            (insert-file-contents post-filename))
-          (org-mode)
-          (goto-char (point-min))
-          (org-map-entries
-           (lambda ()
-             (setq org-map-continue-from (point))
-             (org-cut-subtree))
-           org-static-blog-no-post-tag)
-          (setq result
-                (org-export-as 'org-static-blog-post-bare nil nil nil nil))
-          (switch-to-buffer current-buffer)
-          result)))))
+      (cl-labels ((-org-attach-expand-relative (file)
+                    (concat (file-name-as-directory org-static-blog-attachment-directory)
+                            (file-name-as-directory
+                             (file-relative-name
+                              (org-attach-dir nil t)
+                              (file-name-directory post-filename)))
+                            file)))
+        (unwind-protect
+            (progn
+              (advice-add 'org-attach-expand :override #'-org-attach-expand-relative)
+              (let ((current-buffer (current-buffer))
+                    (buffer-exists (org-static-blog-file-buffer post-filename))
+                    (result nil))
+                (with-temp-buffer
+                  (if buffer-exists
+                      (insert-buffer-substring buffer-exists)
+                    (insert-file-contents post-filename))
+                  (org-mode)
+                  (goto-char (point-min))
+                  (org-map-entries
+                   (lambda ()
+                     (setq org-map-continue-from (point))
+                     (org-cut-subtree))
+                   org-static-blog-no-post-tag)
+                  (setq result
+                        (org-export-as 'org-static-blog-post-bare nil nil nil nil))
+                  (switch-to-buffer current-buffer)
+                  result)))
+          (advice-remove 'org-attach-expand #'-org-attach-expand-relative))))))
 
 (org-export-define-derived-backend 'org-static-blog-post-bare 'html
   :translate-alist '((template . (lambda (contents info) contents))))
